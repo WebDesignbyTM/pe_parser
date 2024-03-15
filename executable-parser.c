@@ -328,6 +328,68 @@ int _ParseExe32(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
         return -1;
     }
 
+    if (ntFileInfo == NULL) {
+        LOG_INVALID_PARAM("PNT_FILE_INFO");
+        return -1;
+    }
+
+    if (dosHeader == NULL) {
+        LOG_INVALID_PARAM("PIMAGE_DOS_HEADER");
+        return -1;
+    }
+
+    if (ntHeader == NULL) {
+        LOG_INVALID_PARAM("PIMAGE_NT_HEADERS32");
+        return -1;
+    }
+
+    do {
+        if (
+			dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
+			ntHeader->FileHeader.SizeOfOptionalHeader > fileInfo->fileSize 
+			) {
+			printf("File is too small for IMAGE_OPTIONAL_HEADER.\n");
+			retVal = -7;
+			break;
+		}
+
+		if (dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
+			ntHeader->FileHeader.SizeOfOptionalHeader + 
+			ntHeader->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER) > fileInfo->fileSize
+			) {
+			printf("File is too small for section headers.\n");
+			retVal = -8;
+			break;
+		}
+
+		if (ntHeader->FileHeader.Characteristics & IMAGE_FILE_DLL) {
+			printf("Parsing a DLL file...\n");
+		}
+
+		if (ntHeader->OptionalHeader.NumberOfRvaAndSizes && 
+			parseExportDirectory(ntHeader->OptionalHeader.DataDirectory, fileInfo, ntHeader) != 0) {
+			printf("There was an error parsing the export directory.\n");
+		}
+
+		if (ntHeader->OptionalHeader.NumberOfRvaAndSizes >= 2 &&
+			parseImportDescriptor(&(ntHeader->OptionalHeader.DataDirectory)[1], fileInfo, ntHeader) != 0) {
+			printf("There was an error parsing the import descriptor.\n");
+		}
+
+#ifdef DEBUGRVA
+		ntFileInfo->ntHeaders = ntHeader;
+		ntFileInfo->rva = ntHeader->OptionalHeader.AddressOfEntryPoint;
+		ntFileInfo->sectionHeaders = (PIMAGE_SECTION_HEADER)((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS32));
+		printf("Alignment is set to 0x%08X for sections.\n", ntHeader->OptionalHeader.SectionAlignment);
+		printf("Alignment is set to 0x%08X for file.\n", ntHeader->OptionalHeader.FileAlignment);
+
+		printf("The file header was parsed successfully.\n");
+		printf("\n*/-------------------------------------\\*\n");
+		printf("*\\-------------------------------------/*\n\n");
+#endif
+
+    } while (0);
+
     return retVal;
 }
 
@@ -374,45 +436,12 @@ int parseExe(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo) {
 		}
 
         // TODO extract the PE32 parser to a separate function and call it
-		if (ntHeader->FileHeader.Machine != IMAGE_FILE_MACHINE_I386) {
-			printf("Can only parse x86 files.\n");
-			retVal = -6;
-			break;
-		}
+		if (ntHeader->FileHeader.Machine == IMAGE_FILE_MACHINE_I386) {
+            retVal = _ParseExe32(fileInfo, ntFileInfo, dosHeader, ntHeader);
+		} else if (ntHeader->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64) {
+            // TODO implement the PE32+ parser and call it
 
-        // TODO implement the PE32+ parser and call it
-
-		if (
-			dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
-			ntHeader->FileHeader.SizeOfOptionalHeader > fileInfo->fileSize 
-			) {
-			printf("File is too small for IMAGE_OPTIONAL_HEADER.\n");
-			retVal = -7;
-			break;
-		}
-
-		if (dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
-			ntHeader->FileHeader.SizeOfOptionalHeader + 
-			ntHeader->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER) > fileInfo->fileSize
-			) {
-			printf("File is too small for section headers.\n");
-			retVal = -8;
-			break;
-		}
-
-		if (ntHeader->FileHeader.Characteristics & IMAGE_FILE_DLL) {
-			printf("Parsing a DLL file...\n");
-		}
-
-		if (ntHeader->OptionalHeader.NumberOfRvaAndSizes && 
-			parseExportDirectory(ntHeader->OptionalHeader.DataDirectory, fileInfo, ntHeader) != 0) {
-			printf("There was an error parsing the export directory.\n");
-		}
-
-		if (ntHeader->OptionalHeader.NumberOfRvaAndSizes >= 2 &&
-			parseImportDescriptor(&(ntHeader->OptionalHeader.DataDirectory)[1], fileInfo, ntHeader) != 0) {
-			printf("There was an error parsing the import descriptor.\n");
-		}
+        }
 
         // if (ntHeader->OptionalHeader.NumberOfRvaAndSizes >= 3 &&
 		// 	parseResourceDirectory(&(ntHeader->OptionalHeader.DataDirectory)[2], fileInfo, ntHeader) != 0) {
@@ -423,19 +452,6 @@ int parseExe(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo) {
 		// 	parseExceptionDirectory(&(ntHeader->OptionalHeader.DataDirectory)[3], fileInfo, ntHeader) != 0) {
 		// 	printf("There was an error parsing the exception descriptor.\n");
 		// }
-
-		ntFileInfo->ntHeaders = ntHeader;
-		ntFileInfo->rva = ntHeader->OptionalHeader.AddressOfEntryPoint;
-		ntFileInfo->sectionHeaders = (PIMAGE_SECTION_HEADER)((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS32));
-
-#ifdef DEBUGRVA
-		printf("Alignment is set to 0x%08X for sections.\n", ntHeader->OptionalHeader.SectionAlignment);
-		printf("Alignment is set to 0x%08X for file.\n", ntHeader->OptionalHeader.FileAlignment);
-
-		printf("The file header was parsed successfully.\n");
-		printf("\n*/-------------------------------------\\*\n");
-		printf("*\\-------------------------------------/*\n\n");
-#endif
 
 	} while (0);
 
