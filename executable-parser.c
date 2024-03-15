@@ -8,6 +8,8 @@
 #define PE_SIGNATURE 0x4550
 //#define DEBUGRVA
 
+#define LOG_INVALID_PARAM(paramType) printf("Invalid %s parameter in %s.\n", paramType, __FUNCTION__)
+
 typedef unsigned long long QWORD;
 
 typedef struct _FILE_INFO {
@@ -26,12 +28,12 @@ typedef struct _NT_FILE_INFO {
 
 int rvaToFileOffset(PIMAGE_NT_HEADERS32 ntHeaders, PIMAGE_SECTION_HEADER sectionHeaders, DWORD rva, DWORD* fileOffset);
 
-int unMapFile(FILE_INFO* fileInfo)
+int unMapFile(PFILE_INFO fileInfo)
 {
 	int retVal = 0;
 
 	if (fileInfo == NULL) {
-		printf("Invalid pointer to FILE_INFO.\n");
+        LOG_INVALID_PARAM("PFILE_INFO");
 		return -1;
 	}
 
@@ -59,10 +61,10 @@ int unMapFile(FILE_INFO* fileInfo)
 	return retVal;
 }
 
-int mapFile(char* path, FILE_INFO* fileInfo)
+int mapFile(char* path, PFILE_INFO fileInfo)
 {
 	if (fileInfo == NULL) {
-		printf("Invalid pointer to FILE_INFO.\n");
+        LOG_INVALID_PARAM("PFILE_INFO");
 		return -1;
 	}
 
@@ -142,17 +144,17 @@ int parseExportDirectory(PIMAGE_DATA_DIRECTORY dExportInfo, PFILE_INFO fileInfo,
 	PWORD nameOrdinalsArray = NULL;
 
 	if (dExportInfo == NULL) {
-		printf("Invalid PIMAGE_DATA_DIRECTORY.\n");
+        LOG_INVALID_PARAM("PIMAGE_DATA_DIRECTORY");
 		return -1;
 	}
 
 	if (fileInfo == NULL) {
-		printf("Invalid PFILE_INFO.\n");
+        LOG_INVALID_PARAM("PFILE_INFO");
 		return -1;
 	}
 
 	if (ntHeader == NULL) {
-		printf("Invalid PIMAGE_NT_HEADERS32.\n");
+        LOG_INVALID_PARAM("PIMAGE_NT_HEADERS32");
 		return -1;
 	}
 
@@ -239,17 +241,17 @@ int parseImportDescriptor(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileInfo
 
 
 	if (dImportInfo == NULL) {
-		printf("Invalid PIMAGE_DATA_DIRECTORY.\n");
+        LOG_INVALID_PARAM("PIMAGE_DATA_DIRECTORY");
 		return -1;
 	}
 
 	if (fileInfo == NULL) {
-		printf("Invalid PFILE_INFO.\n");
+        LOG_INVALID_PARAM("PFILE_INFO");
 		return -1;
 	}
 
 	if (ntHeader == NULL) {
-		printf("Invalid PIMAGE_NT_HEADERS32.\n");
+        LOG_INVALID_PARAM("PIMAGE_NT_HEADERS32");
 		return -1;
 	}
 
@@ -317,18 +319,30 @@ int parseImportDescriptor(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileInfo
 	return retVal;
 }
 
+int _ParseExe32(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo, 
+                PIMAGE_DOS_HEADER dosHeader, PIMAGE_NT_HEADERS32 ntHeader) {
+    int retVal = 0;
+
+    if (fileInfo == NULL) {
+        LOG_INVALID_PARAM("PFILE_INFO");
+        return -1;
+    }
+
+    return retVal;
+}
+
 int parseExe(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo) {
 	int retVal = 0;
 	PIMAGE_DOS_HEADER dosHeader = NULL;
 	PIMAGE_NT_HEADERS32 ntHeader = NULL;
 
 	if (fileInfo == NULL) {
-		printf("Invalid PFILE_INFO.\n");
+        LOG_INVALID_PARAM("PFILE_INFO");
 		return -1;
 	}
 
 	if (ntFileInfo == NULL) {
-		printf("Invalid PNT_FILE_INFO.\n");
+        LOG_INVALID_PARAM("PNT_FILE_INFO");
 		return -1;
 	}
 
@@ -381,7 +395,7 @@ int parseExe(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo) {
 			ntHeader->FileHeader.SizeOfOptionalHeader + 
 			ntHeader->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER) > fileInfo->fileSize
 			) {
-			printf("File is too smal for section headers.\n");
+			printf("File is too small for section headers.\n");
 			retVal = -8;
 			break;
 		}
@@ -432,17 +446,17 @@ int rvaToFileOffset(PIMAGE_NT_HEADERS32 ntHeaders, PIMAGE_SECTION_HEADER section
 	int retVal = -3;
 
 	if (ntHeaders == NULL) {
-		printf("Invalid PIMAGE_NT_HEADERS32.\n");
+        LOG_INVALID_PARAM("PIMAGE_NT_HEADERS32");
 		return -1;
 	}
 
 	if (sectionHeaders == NULL) {
-		printf("Invalid PIMAGE_SECTION_HEADER.\n");
+        LOG_INVALID_PARAM("PIMAGE_SECTION_HEADER");
 		return -1;
 	}
 
 	if (fileOffset == NULL) {
-		printf("Invalid DWORD.\n");
+        LOG_INVALID_PARAM("DWORD");
 		return -1;
 	}
 
