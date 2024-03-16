@@ -10,7 +10,7 @@
 
 #define LOG_INVALID_PARAM(paramType) printf("Invalid %s parameter in %s.\n", paramType, __FUNCTION__)
 
-typedef unsigned long long QWORD;
+typedef unsigned long long QWORD, *PQWORD;
 
 typedef struct _FILE_INFO {
 	HANDLE fileHandle;
@@ -25,6 +25,11 @@ typedef struct _NT_FILE_INFO {
 	DWORD rva;
 	DWORD fileOffset;
 } NT_FILE_INFO, *PNT_FILE_INFO;
+
+typedef enum _PE_ARCHITECTURE {
+    PE_X86,
+    PE_X64
+} PE_ARCHITECTURE;
 
 int rvaToFileOffset(WORD numberOfSections, 
                     DWORD sectionAlignment, 
@@ -250,15 +255,20 @@ int parseExportDirectory(
 	return retVal;
 }
 
-int parseImportDescriptor32(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileInfo, PIMAGE_NT_HEADERS32 ntHeader) {
+int parseImportDescriptor(
+    PIMAGE_DATA_DIRECTORY dImportInfo, 
+    PFILE_INFO fileInfo, 
+    PIMAGE_SECTION_HEADER sectionHeader,
+    WORD numberOfSections,
+    DWORD sectionAlignment,
+    PE_ARCHITECTURE peArch
+) {
 	int retVal = 0;
 	DWORD importDescOffset;
 	PIMAGE_IMPORT_DESCRIPTOR importDesc = NULL;
 	DWORD descriptorIdx = 0;
-	PIMAGE_SECTION_HEADER sectionHeader = NULL;
 	DWORD dllNameOffset;
 	DWORD importLookupOffset;
-	PDWORD importLookupTable = NULL;
 	DWORD lookupIdx;
 	DWORD nameOffset;
 	PIMAGE_IMPORT_BY_NAME fHintName = NULL;
@@ -274,12 +284,22 @@ int parseImportDescriptor32(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileIn
 		return -1;
 	}
 
-	if (ntHeader == NULL) {
-        LOG_INVALID_PARAM("PIMAGE_NT_HEADERS32");
+	if (sectionHeader == NULL) {
+        LOG_INVALID_PARAM("PIMAGE_SECTION_HEADER");
 		return -1;
 	}
 
-	sectionHeader = (PIMAGE_SECTION_HEADER)((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS32));
+    if (!numberOfSections) {
+        LOG_INVALID_PARAM("WORD");
+        return -1;
+    }
+
+    if (!sectionAlignment) {
+        LOG_INVALID_PARAM("DWORD");
+        return -1;
+    }
+
+	// sectionHeader = (PIMAGE_SECTION_HEADER)((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS32));
 
 	do {
 		if (dImportInfo->Size == 0) {
@@ -290,8 +310,8 @@ int parseImportDescriptor32(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileIn
 
 		printf("\nParsing the import descriptors...\n\n");
 
-		if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
-                                        sectionHeader, dImportInfo->VirtualAddress, &importDescOffset)) != 0) {
+		if ((retVal = rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, dImportInfo->VirtualAddress, 
+                                        &importDescOffset)) != 0) {
 			printf("There was an error transforming the import descriptor RVA to file offset.\n");
 			retVal = -3;
 			break;
@@ -301,8 +321,8 @@ int parseImportDescriptor32(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileIn
 
 		while (importDesc[descriptorIdx].Characteristics != 0) {
 
-			if (rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
-                                sectionHeader, importDesc[descriptorIdx].Name, &dllNameOffset) != 0) {
+			if (rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, importDesc[descriptorIdx].Name, 
+                                &dllNameOffset) != 0) {
 				printf("There was an error transforming the dll name RVA to file offset with index %u.\n", descriptorIdx);
 				continue;
 			}
@@ -310,32 +330,58 @@ int parseImportDescriptor32(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileIn
 			printf("Importing from %s\n", fileInfo->fileData + dllNameOffset);
 
 
-			if (rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
-                                sectionHeader, importDesc[descriptorIdx].Characteristics, &importLookupOffset) != 0) {
+			if (rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, 
+                                importDesc[descriptorIdx].Characteristics, &importLookupOffset) != 0) {
 				printf("There was an error transforming the import lookup table RVA to file offset.\n");
 				continue;
 			}
-			importLookupTable = (PDWORD)(fileInfo->fileData + importLookupOffset);
+
 			lookupIdx = 0;
 
-			while (importLookupTable[lookupIdx]) {
-				printf("Function %u is imported by ", lookupIdx);
-				if (importLookupTable[lookupIdx] & 0x80000000) {
-					printf("ordinal: 0x%08X", importLookupTable[lookupIdx] & 0x0000FFFF);
-				}
-				else {
-					if (rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
-                                        sectionHeader, importLookupTable[lookupIdx] & 0x7FFFFFFF, &nameOffset) != 0) {
-						printf("There was an error transforming the hint/name RVA to file offset with index %u\n", lookupIdx);
-						continue;
-					}
-					fHintName = (PIMAGE_IMPORT_BY_NAME)(fileInfo->fileData + nameOffset);
-					printf("ordinal and name: 0x%08X - %s", fHintName->Hint, fHintName->Name);
-				}
+            if (peArch == PE_X86) {
+                PDWORD importLookupTable = (PDWORD)(fileInfo->fileData + importLookupOffset);
 
-				++lookupIdx;
-				printf("\n");
-			}
+                while (importLookupTable[lookupIdx]) {
+                    printf("Function %u is imported by ", lookupIdx);
+                    if (importLookupTable[lookupIdx] & 0x80000000) {
+                        printf("ordinal: 0x%08X", importLookupTable[lookupIdx] & 0x0000FFFF);
+                    }
+                    else {
+                        if (rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, 
+                                            importLookupTable[lookupIdx] & 0x7FFFFFFF, &nameOffset) != 0) {
+                            printf("There was an error transforming the hint/name RVA to file offset with index %u\n", lookupIdx);
+                            continue;
+                        }
+                        fHintName = (PIMAGE_IMPORT_BY_NAME)(fileInfo->fileData + nameOffset);
+                        printf("ordinal and name: 0x%08X - %s", fHintName->Hint, fHintName->Name);
+                    }
+
+                    ++lookupIdx;
+                    printf("\n");
+                }
+            }
+            else if (peArch == PE_X64) {
+                PQWORD importLookupTable = (PQWORD)(fileInfo->fileData + importLookupOffset);
+
+                while (importLookupTable[lookupIdx]) {
+                    printf("Function %u is imported by ", lookupIdx);
+                    if (importLookupTable[lookupIdx] & 0x8000000000000000) {
+                        printf("ordinal: 0x%016I64X", importLookupTable[lookupIdx] & 0x0000FFFF);
+                    }
+                    else {
+                        if (rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, 
+                                            importLookupTable[lookupIdx] & 0x7FFFFFFF, &nameOffset) != 0) {
+                            printf("There was an error transforming the hint/name RVA to file offset with index %u\n", lookupIdx);
+                            continue;
+                        }
+                        fHintName = (PIMAGE_IMPORT_BY_NAME)(fileInfo->fileData + nameOffset);
+                        printf("ordinal and name: 0x%08X - %s", fHintName->Hint, fHintName->Name);
+                    }
+
+                    ++lookupIdx;
+                    printf("\n");
+                }
+            }
 
 			++descriptorIdx;
 			printf("\n");
@@ -402,7 +448,13 @@ int _ParseExe32(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
 		}
 
 		if (ntHeader->OptionalHeader.NumberOfRvaAndSizes >= 2 &&
-			parseImportDescriptor32(&(ntHeader->OptionalHeader.DataDirectory)[1], fileInfo, ntHeader) != 0) {
+			parseImportDescriptor(
+                &(ntHeader->OptionalHeader.DataDirectory)[1], 
+                fileInfo, 
+                (PIMAGE_SECTION_HEADER) ((PBYTE) ntHeader + sizeof(IMAGE_NT_HEADERS32)),
+                ntHeader->FileHeader.NumberOfSections,
+                ntHeader->OptionalHeader.SectionAlignment,
+                0) != 0) {
 			printf("There was an error parsing the import descriptor.\n");
 		}
 
@@ -476,6 +528,17 @@ int _ParseExe64(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
                 ntHeader->OptionalHeader.SectionAlignment) != 0) {
             printf("There was an error parsing the export directory.\n");
         }
+
+        if (ntHeader->OptionalHeader.NumberOfRvaAndSizes >= 2 &&
+			parseImportDescriptor(
+                &(ntHeader->OptionalHeader.DataDirectory)[1], 
+                fileInfo, 
+                (PIMAGE_SECTION_HEADER) ((PBYTE) ntHeader + sizeof(IMAGE_NT_HEADERS64)),
+                ntHeader->FileHeader.NumberOfSections,
+                ntHeader->OptionalHeader.SectionAlignment,
+                1) != 0) {
+			printf("There was an error parsing the import descriptor.\n");
+		}
 
 #ifdef DEBUGRVA
 		ntFileInfo->ntHeaders = ntHeader;
