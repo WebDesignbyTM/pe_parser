@@ -26,7 +26,12 @@ typedef struct _NT_FILE_INFO {
 	DWORD fileOffset;
 } NT_FILE_INFO, *PNT_FILE_INFO;
 
-int rvaToFileOffset(PIMAGE_NT_HEADERS32 ntHeaders, PIMAGE_SECTION_HEADER sectionHeaders, DWORD rva, DWORD* fileOffset);
+int rvaToFileOffset(WORD numberOfSections, 
+                    DWORD sectionAlignment, 
+                    PIMAGE_SECTION_HEADER sectionHeaders, 
+                    DWORD rva, 
+                    DWORD* fileOffset
+);
 
 int unMapFile(PFILE_INFO fileInfo)
 {
@@ -169,25 +174,29 @@ int parseExportDirectory32(PIMAGE_DATA_DIRECTORY dExportInfo, PFILE_INFO fileInf
 		printf("\nParsing the export directory...\n\n");
 
 
-		if ((retVal = rvaToFileOffset(ntHeader, sectionHeader, dExportInfo->VirtualAddress, &exportOffset)) != 0) {
+		if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
+                                        sectionHeader, dExportInfo->VirtualAddress, &exportOffset)) != 0) {
 			printf("An error ocurred while transforming the exports RVA to file offset.\n");
 			break;
 		}
 		exportDir = (PIMAGE_EXPORT_DIRECTORY) (fileInfo->fileData + exportOffset);
 
-		if ((retVal = rvaToFileOffset(ntHeader, sectionHeader, exportDir->AddressOfFunctions, &functionsOffset)) != 0) {
+		if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
+                                        sectionHeader, exportDir->AddressOfFunctions, &functionsOffset)) != 0) {
 			printf("An error ocurred while transforming the functions RVA to file offset.\n");
 			break;
 		}
 		functionsArray = (PDWORD)(fileInfo->fileData + functionsOffset);
 		
-		if ((retVal = rvaToFileOffset(ntHeader, sectionHeader, exportDir->AddressOfNames, &namesOffset)) != 0) {
+		if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
+                                        sectionHeader, exportDir->AddressOfNames, &namesOffset)) != 0) {
 			printf("An error ocurred while transforming the names RVA to file offset.\n");
 			break;
 		}
 		namesArray = (PDWORD)(fileInfo->fileData + namesOffset);
 		
-		if ((retVal = rvaToFileOffset(ntHeader, sectionHeader, exportDir->AddressOfNameOrdinals, &nameOrdinalsOffset)) != 0) {
+		if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
+                                        sectionHeader, exportDir->AddressOfNameOrdinals, &nameOrdinalsOffset)) != 0) {
 			printf("An error ocurred while transforming the name ordinals RVA to file offset.\n");
 			break;
 		}
@@ -196,7 +205,8 @@ int parseExportDirectory32(PIMAGE_DATA_DIRECTORY dExportInfo, PFILE_INFO fileInf
 
 		for (DWORD i = 0; i < exportDir->NumberOfFunctions; ++i) {
 
-			if (rvaToFileOffset(ntHeader, sectionHeader, functionsArray[i], &functionsArrayOffset) != 0) {
+			if (rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
+                                sectionHeader, functionsArray[i], &functionsArrayOffset) != 0) {
 				printf("There was an error transforming the function RVA to PA for function %u (0x%08X).\n", i + exportDir->Base, functionsArray[i]);
 				continue;
 			}
@@ -209,7 +219,8 @@ int parseExportDirectory32(PIMAGE_DATA_DIRECTORY dExportInfo, PFILE_INFO fileInf
 			else {
 				for (DWORD j = 0; j < exportDir->NumberOfNames; ++j) {
 					if (nameOrdinalsArray[j] == i) {
-						if ((retVal = rvaToFileOffset(ntHeader, sectionHeader, namesArray[j], &namesArrayOffset)) != 0) {
+						if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
+                                                        sectionHeader, namesArray[j], &namesArrayOffset)) != 0) {
 							printf("There was an error transforming the name array RVA to file offset for name %u.\n", j);
 							continue;
 						}
@@ -266,7 +277,8 @@ int parseImportDescriptor32(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileIn
 
 		printf("\nParsing the import descriptors...\n\n");
 
-		if ((retVal = rvaToFileOffset(ntHeader, sectionHeader, dImportInfo->VirtualAddress, &importDescOffset)) != 0) {
+		if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
+                                        sectionHeader, dImportInfo->VirtualAddress, &importDescOffset)) != 0) {
 			printf("There was an error transforming the import descriptor RVA to file offset.\n");
 			retVal = -3;
 			break;
@@ -276,7 +288,8 @@ int parseImportDescriptor32(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileIn
 
 		while (importDesc[descriptorIdx].Characteristics != 0) {
 
-			if (rvaToFileOffset(ntHeader, sectionHeader, importDesc[descriptorIdx].Name, &dllNameOffset) != 0) {
+			if (rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
+                                sectionHeader, importDesc[descriptorIdx].Name, &dllNameOffset) != 0) {
 				printf("There was an error transforming the dll name RVA to file offset with index %u.\n", descriptorIdx);
 				continue;
 			}
@@ -284,7 +297,8 @@ int parseImportDescriptor32(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileIn
 			printf("Importing from %s\n", fileInfo->fileData + dllNameOffset);
 
 
-			if (rvaToFileOffset(ntHeader, sectionHeader, importDesc[descriptorIdx].Characteristics, &importLookupOffset) != 0) {
+			if (rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
+                                sectionHeader, importDesc[descriptorIdx].Characteristics, &importLookupOffset) != 0) {
 				printf("There was an error transforming the import lookup table RVA to file offset.\n");
 				continue;
 			}
@@ -297,8 +311,8 @@ int parseImportDescriptor32(PIMAGE_DATA_DIRECTORY dImportInfo, PFILE_INFO fileIn
 					printf("ordinal: 0x%08X", importLookupTable[lookupIdx] & 0x0000FFFF);
 				}
 				else {
-					if (rvaToFileOffset(ntHeader, sectionHeader, 
-						importLookupTable[lookupIdx] & 0x7FFFFFFF, &nameOffset) != 0) {
+					if (rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
+                                        sectionHeader, importLookupTable[lookupIdx] & 0x7FFFFFFF, &nameOffset) != 0) {
 						printf("There was an error transforming the hint/name RVA to file offset with index %u\n", lookupIdx);
 						continue;
 					}
@@ -344,10 +358,8 @@ int _ParseExe32(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
     }
 
     do {
-        if (
-			dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
-			ntHeader->FileHeader.SizeOfOptionalHeader > fileInfo->fileSize 
-			) {
+        if (dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
+			ntHeader->FileHeader.SizeOfOptionalHeader > fileInfo->fileSize) {
 			printf("File is too small for IMAGE_OPTIONAL_HEADER.\n");
 			retVal = -7;
 			break;
@@ -355,8 +367,7 @@ int _ParseExe32(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
 
 		if (dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
 			ntHeader->FileHeader.SizeOfOptionalHeader + 
-			ntHeader->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER) > fileInfo->fileSize
-			) {
+			ntHeader->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER) > fileInfo->fileSize) {
 			printf("File is too small for section headers.\n");
 			retVal = -8;
 			break;
@@ -418,10 +429,8 @@ int _ParseExe64(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
     }
     
     do {
-        if (
-			dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
-			ntHeader->FileHeader.SizeOfOptionalHeader > fileInfo->fileSize 
-			) {
+        if (dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
+			ntHeader->FileHeader.SizeOfOptionalHeader > fileInfo->fileSize) {
 			printf("File is too small for IMAGE_OPTIONAL_HEADER.\n");
 			retVal = -7;
 			break;
@@ -429,8 +438,7 @@ int _ParseExe64(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
 
 		if (dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
 			ntHeader->FileHeader.SizeOfOptionalHeader + 
-			ntHeader->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER) > fileInfo->fileSize
-			) {
+			ntHeader->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER) > fileInfo->fileSize) {
 			printf("File is too small for section headers.\n");
 			retVal = -8;
 			break;
@@ -439,6 +447,8 @@ int _ParseExe64(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
 		if (ntHeader->FileHeader.Characteristics & IMAGE_FILE_DLL) {
 			printf("Parsing a DLL file...\n");
 		}
+
+        // if (ntHeader->OptionalHeader.NumberOfRvaAndSizes && )
 
 #ifdef DEBUGRVA
 		ntFileInfo->ntHeaders = ntHeader;
@@ -525,13 +535,20 @@ int parseExe(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo) {
 	return retVal;
 }
 
-int rvaToFileOffset(PIMAGE_NT_HEADERS32 ntHeaders, PIMAGE_SECTION_HEADER sectionHeaders, DWORD rva, DWORD* fileOffset) {
+int rvaToFileOffset(WORD numberOfSections, DWORD sectionAlignment, PIMAGE_SECTION_HEADER sectionHeaders, DWORD rva, DWORD* fileOffset) {
 	int retVal = -3;
 
-	if (ntHeaders == NULL) {
-        LOG_INVALID_PARAM("PIMAGE_NT_HEADERS32");
+	if (!numberOfSections) {
+        LOG_INVALID_PARAM("WORD");
+        printf("No sections for RVA to file conversion.\n");
 		return -1;
 	}
+
+    if (!sectionAlignment) {
+        LOG_INVALID_PARAM("WORD");
+        printf("No section alignment for RVA to file conversion.\n");
+		return -1;
+    }
 
 	if (sectionHeaders == NULL) {
         LOG_INVALID_PARAM("PIMAGE_SECTION_HEADER");
@@ -545,10 +562,10 @@ int rvaToFileOffset(PIMAGE_NT_HEADERS32 ntHeaders, PIMAGE_SECTION_HEADER section
 
 	do {
 #ifdef DEBUGRVA
-		printf("Total number of sections: %hu\n", ntHeaders->FileHeader.NumberOfSections);
+		printf("Total number of sections: %hu\n", numberOfSections);
 		printf("Address of Entry Point(RVA): 0x%08X\n", rva);
 #endif
-		for (WORD i = 0; i < ntHeaders->FileHeader.NumberOfSections; ++i) {
+		for (WORD i = 0; i < numberOfSections; ++i) {
 #ifdef DEBUGRVA
 			printf("\nSize of sector with index %d: 0x%08X\n", i, sectionHeaders[i].SizeOfRawData);
 			printf("Address of sector with index %d(PA): 0x%08X\n", i, sectionHeaders[i].PointerToRawData);
@@ -557,9 +574,9 @@ int rvaToFileOffset(PIMAGE_NT_HEADERS32 ntHeaders, PIMAGE_SECTION_HEADER section
 
 			// Calculez pana unde merge pagina sectorului curent
 			DWORD endOfSector = (sectionHeaders[i].VirtualAddress + sectionHeaders[i].Misc.VirtualSize + 
-				ntHeaders->OptionalHeader.SectionAlignment - 1);
-			endOfSector /= ntHeaders->OptionalHeader.SectionAlignment;
-			endOfSector *= ntHeaders->OptionalHeader.SectionAlignment;
+				sectionAlignment - 1);
+			endOfSector /= sectionAlignment;
+			endOfSector *= sectionAlignment;
 
 #ifdef DEBUGRVA
 			printf("End of sector is at: 0x%08X\n", endOfSector);
