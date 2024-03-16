@@ -135,10 +135,15 @@ int mapFile(char* path, PFILE_INFO fileInfo)
 	return retVal;
 }
 
-int parseExportDirectory32(PIMAGE_DATA_DIRECTORY dExportInfo, PFILE_INFO fileInfo, PIMAGE_NT_HEADERS32 ntHeader) {
+int parseExportDirectory(
+    PIMAGE_DATA_DIRECTORY dExportInfo, 
+    PFILE_INFO fileInfo, 
+    PIMAGE_SECTION_HEADER sectionHeader,
+    WORD numberOfSections,
+    DWORD sectionAlignment
+) {
 	int retVal = 0;
 	PIMAGE_EXPORT_DIRECTORY exportDir = NULL;
-	PIMAGE_SECTION_HEADER sectionHeader = NULL;
 	DWORD exportOffset;
 	DWORD namesOffset, functionsOffset, nameOrdinalsOffset;
 	DWORD namesArrayOffset;
@@ -158,12 +163,20 @@ int parseExportDirectory32(PIMAGE_DATA_DIRECTORY dExportInfo, PFILE_INFO fileInf
 		return -1;
 	}
 
-	if (ntHeader == NULL) {
-        LOG_INVALID_PARAM("PIMAGE_NT_HEADERS32");
-		return -1;
-	}
+    if (sectionHeader == NULL) {
+        LOG_INVALID_PARAM("PIMAGE_SECTION_HEADER");
+        return -1;
+    }
 
-	sectionHeader = (PIMAGE_SECTION_HEADER)((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS32));
+    if (!numberOfSections) {
+        LOG_INVALID_PARAM("WORD");
+        return -1;
+    }
+
+    if (!sectionAlignment) {
+        LOG_INVALID_PARAM("DWORD");
+        return -1;
+    }
 
 	do {
 		if (dExportInfo->Size == 0) {
@@ -174,29 +187,29 @@ int parseExportDirectory32(PIMAGE_DATA_DIRECTORY dExportInfo, PFILE_INFO fileInf
 		printf("\nParsing the export directory...\n\n");
 
 
-		if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
-                                        sectionHeader, dExportInfo->VirtualAddress, &exportOffset)) != 0) {
+		if ((retVal = rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, 
+                                        dExportInfo->VirtualAddress, &exportOffset)) != 0) {
 			printf("An error ocurred while transforming the exports RVA to file offset.\n");
 			break;
 		}
 		exportDir = (PIMAGE_EXPORT_DIRECTORY) (fileInfo->fileData + exportOffset);
 
-		if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
-                                        sectionHeader, exportDir->AddressOfFunctions, &functionsOffset)) != 0) {
+		if ((retVal = rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, 
+                                        exportDir->AddressOfFunctions, &functionsOffset)) != 0) {
 			printf("An error ocurred while transforming the functions RVA to file offset.\n");
 			break;
 		}
 		functionsArray = (PDWORD)(fileInfo->fileData + functionsOffset);
 		
-		if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
-                                        sectionHeader, exportDir->AddressOfNames, &namesOffset)) != 0) {
+		if ((retVal = rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, 
+                                        exportDir->AddressOfNames, &namesOffset)) != 0) {
 			printf("An error ocurred while transforming the names RVA to file offset.\n");
 			break;
 		}
 		namesArray = (PDWORD)(fileInfo->fileData + namesOffset);
 		
-		if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
-                                        sectionHeader, exportDir->AddressOfNameOrdinals, &nameOrdinalsOffset)) != 0) {
+		if ((retVal = rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, 
+                                        exportDir->AddressOfNameOrdinals, &nameOrdinalsOffset)) != 0) {
 			printf("An error ocurred while transforming the name ordinals RVA to file offset.\n");
 			break;
 		}
@@ -205,8 +218,8 @@ int parseExportDirectory32(PIMAGE_DATA_DIRECTORY dExportInfo, PFILE_INFO fileInf
 
 		for (DWORD i = 0; i < exportDir->NumberOfFunctions; ++i) {
 
-			if (rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
-                                sectionHeader, functionsArray[i], &functionsArrayOffset) != 0) {
+			if (rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, functionsArray[i], 
+                                &functionsArrayOffset) != 0) {
 				printf("There was an error transforming the function RVA to PA for function %u (0x%08X).\n", i + exportDir->Base, functionsArray[i]);
 				continue;
 			}
@@ -219,8 +232,8 @@ int parseExportDirectory32(PIMAGE_DATA_DIRECTORY dExportInfo, PFILE_INFO fileInf
 			else {
 				for (DWORD j = 0; j < exportDir->NumberOfNames; ++j) {
 					if (nameOrdinalsArray[j] == i) {
-						if ((retVal = rvaToFileOffset(ntHeader->FileHeader.NumberOfSections, ntHeader->OptionalHeader.SectionAlignment, 
-                                                        sectionHeader, namesArray[j], &namesArrayOffset)) != 0) {
+						if ((retVal = rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, namesArray[j], 
+                                                        &namesArrayOffset)) != 0) {
 							printf("There was an error transforming the name array RVA to file offset for name %u.\n", j);
 							continue;
 						}
@@ -378,7 +391,13 @@ int _ParseExe32(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
 		}
 
 		if (ntHeader->OptionalHeader.NumberOfRvaAndSizes && 
-			parseExportDirectory32(ntHeader->OptionalHeader.DataDirectory, fileInfo, ntHeader) != 0) {
+			parseExportDirectory(
+                ntHeader->OptionalHeader.DataDirectory, 
+                fileInfo, 
+                (PIMAGE_SECTION_HEADER)((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS32)),
+                ntHeader->FileHeader.NumberOfSections,
+                ntHeader->OptionalHeader.SectionAlignment) != 0) {
+
 			printf("There was an error parsing the export directory.\n");
 		}
 
@@ -448,7 +467,15 @@ int _ParseExe64(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
 			printf("Parsing a DLL file...\n");
 		}
 
-        // if (ntHeader->OptionalHeader.NumberOfRvaAndSizes && )
+        if (ntHeader->OptionalHeader.NumberOfRvaAndSizes && 
+            parseExportDirectory(
+                ntHeader->OptionalHeader.DataDirectory, 
+                fileInfo, 
+                (PIMAGE_SECTION_HEADER)((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS64)),
+                ntHeader->FileHeader.NumberOfSections,
+                ntHeader->OptionalHeader.SectionAlignment) != 0) {
+            printf("There was an error parsing the export directory.\n");
+        }
 
 #ifdef DEBUGRVA
 		ntFileInfo->ntHeaders = ntHeader;
