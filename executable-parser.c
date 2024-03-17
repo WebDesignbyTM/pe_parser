@@ -1,44 +1,5 @@
-#include <stdio.h>
-#include <Windows.h>
-#include <winnt.h>
-#include <stdlib.h>
-#include <crtdbg.h>
-
-#define _CRTDBG_MAP_ALLOC
-#define DOS_SIGNATURE 0x5A4D
-#define PE_SIGNATURE 0x4550
+#include "executable-parser.h"
 //#define DEBUGRVA
-
-#define LOG_INVALID_PARAM(paramType) printf("Invalid %s parameter in %s.\n", paramType, __FUNCTION__)
-
-typedef unsigned long long QWORD, *PQWORD;
-
-typedef struct _FILE_INFO {
-	HANDLE fileHandle;
-	HANDLE mappingHandle;
-	BYTE* fileData;
-	DWORD fileSize;
-} FILE_INFO, *PFILE_INFO;
-
-typedef struct _NT_FILE_INFO {
-	PIMAGE_NT_HEADERS32 ntHeaders;
-	PIMAGE_SECTION_HEADER sectionHeaders;
-	DWORD rva;
-	DWORD fileOffset;
-} NT_FILE_INFO, *PNT_FILE_INFO;
-
-typedef enum _PE_ARCHITECTURE {
-    PE_UNDEF,
-    PE_X86,
-    PE_X64
-} PE_ARCHITECTURE;
-
-int rvaToFileOffset(WORD numberOfSections, 
-                    DWORD sectionAlignment, 
-                    PIMAGE_SECTION_HEADER sectionHeaders, 
-                    DWORD rva, 
-                    DWORD* fileOffset
-);
 
 int unMapFile(PFILE_INFO fileInfo)
 {
@@ -419,6 +380,7 @@ int parseExceptionDirectory(
     DWORD exceptionDirOffset = 0;
     PIMAGE_IA64_RUNTIME_FUNCTION_ENTRY runtimeFunction = NULL;
     
+    
     if (dExceptionInfo == NULL) {
         LOG_INVALID_PARAM("PIMAGE_DATA_DIRECTORY");
 		return -1;
@@ -473,27 +435,6 @@ int parseExceptionDirectory(
 
     return retVal;
 }
-
-int (*directoryParserFunctions[])(
-    PIMAGE_DATA_DIRECTORY, 
-    PFILE_INFO,
-    PIMAGE_SECTION_HEADER,
-    WORD,
-    DWORD,
-    PE_ARCHITECTURE
-) = {
-    parseExportDirectory,
-    parseImportDescriptor,
-    parseResourceDirectory,
-    parseExceptionDirectory
-};
-
-char *directoryNames[] = {
-    "export",
-    "import",
-    "resource",
-    "exception"
-};
 
 int _ParseExe32(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo, 
                 PIMAGE_DOS_HEADER dosHeader, PIMAGE_NT_HEADERS32 ntHeader) {
