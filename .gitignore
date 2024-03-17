@@ -1,6 +1,9 @@
 .vscode
-vc140.pdb
-executable-parser.pdb
-executable-parser.obj
-executable-parser.ilk
-executable-parser.exe
+*.pdb
+*.obj
+*.ilk
+*.exe
+*.id?
+*.i64
+*.nam
+*.til
