@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <Windows.h>
+#include <winnt.h>
 #include <stdlib.h>
 #include <crtdbg.h>
 
@@ -27,6 +28,7 @@ typedef struct _NT_FILE_INFO {
 } NT_FILE_INFO, *PNT_FILE_INFO;
 
 typedef enum _PE_ARCHITECTURE {
+    PE_UNDEF,
     PE_X86,
     PE_X64
 } PE_ARCHITECTURE;
@@ -145,7 +147,8 @@ int parseExportDirectory(
     PFILE_INFO fileInfo, 
     PIMAGE_SECTION_HEADER sectionHeader,
     WORD numberOfSections,
-    DWORD sectionAlignment
+    DWORD sectionAlignment,
+    PE_ARCHITECTURE peArch
 ) {
 	int retVal = 0;
 	PIMAGE_EXPORT_DIRECTORY exportDir = NULL;
@@ -392,6 +395,106 @@ int parseImportDescriptor(
 	return retVal;
 }
 
+int parseResourceDirectory(
+    PIMAGE_DATA_DIRECTORY dRsrcInfo, 
+    PFILE_INFO fileInfo, 
+    PIMAGE_SECTION_HEADER sectionHeader,
+    WORD numberOfSections,
+    DWORD sectionAlignment,
+    PE_ARCHITECTURE peArch
+) {
+    printf("Resource parsing is not currently supported.\n");
+    return 0;
+}
+
+int parseExceptionDirectory(
+    PIMAGE_DATA_DIRECTORY dExceptionInfo, 
+    PFILE_INFO fileInfo, 
+    PIMAGE_SECTION_HEADER sectionHeader,
+    WORD numberOfSections,
+    DWORD sectionAlignment,
+    PE_ARCHITECTURE peArch
+) {
+    int retVal = 0;
+    DWORD exceptionDirOffset = 0;
+    PIMAGE_IA64_RUNTIME_FUNCTION_ENTRY runtimeFunction = NULL;
+    
+    if (dExceptionInfo == NULL) {
+        LOG_INVALID_PARAM("PIMAGE_DATA_DIRECTORY");
+		return -1;
+	}
+
+	if (fileInfo == NULL) {
+        LOG_INVALID_PARAM("PFILE_INFO");
+		return -1;
+	}
+
+    if (sectionHeader == NULL) {
+        LOG_INVALID_PARAM("PIMAGE_SECTION_HEADER");
+        return -1;
+    }
+
+    if (!numberOfSections) {
+        LOG_INVALID_PARAM("WORD");
+        return -1;
+    }
+
+    if (!sectionAlignment) {
+        LOG_INVALID_PARAM("DWORD");
+        return -1;
+    }
+
+	do {
+		if (dExceptionInfo->Size == 0) {
+			printf("The file has no exception directory.\n");
+			retVal = -2;
+			break;
+		}
+
+		printf("\nParsing the exception directory...\n\n");
+
+        if ((retVal = rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, dExceptionInfo->VirtualAddress, 
+                                        &exceptionDirOffset)) != 0) {
+			printf("There was an error transforming the import descriptor RVA to file offset.\n");
+			retVal = -3;
+			break;
+		}
+        runtimeFunction = (PIMAGE_IA64_RUNTIME_FUNCTION_ENTRY) (fileInfo->fileData + exceptionDirOffset);
+
+        for (int i = 0; i < dExceptionInfo->Size / sizeof(IMAGE_IA64_RUNTIME_FUNCTION_ENTRY); ++i) {
+            printf("Identified exception-related function at 0x08%X-0x08%X.\n", 
+                runtimeFunction->BeginAddress, runtimeFunction->EndAddress);
+            printf("Found unwind info at 0x%08X.\n", runtimeFunction->UnwindInfoAddress);
+
+            ++runtimeFunction;
+        }
+
+    } while (0);
+
+    return retVal;
+}
+
+int (*directoryParserFunctions[])(
+    PIMAGE_DATA_DIRECTORY, 
+    PFILE_INFO,
+    PIMAGE_SECTION_HEADER,
+    WORD,
+    DWORD,
+    PE_ARCHITECTURE
+) = {
+    parseExportDirectory,
+    parseImportDescriptor,
+    parseResourceDirectory,
+    parseExceptionDirectory
+};
+
+char *directoryNames[] = {
+    "export",
+    "import",
+    "resource",
+    "exception"
+};
+
 int _ParseExe32(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo, 
                 PIMAGE_DOS_HEADER dosHeader, PIMAGE_NT_HEADERS32 ntHeader) {
     int retVal = 0;
@@ -436,27 +539,17 @@ int _ParseExe32(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
 			printf("Parsing a DLL file...\n");
 		}
 
-		if (ntHeader->OptionalHeader.NumberOfRvaAndSizes && 
-			parseExportDirectory(
-                ntHeader->OptionalHeader.DataDirectory, 
-                fileInfo, 
-                (PIMAGE_SECTION_HEADER)((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS32)),
+        for (int i = 0; i < min(ntHeader->OptionalHeader.NumberOfRvaAndSizes, 4); ++i) {
+            if (directoryParserFunctions[i](
+                &(ntHeader->OptionalHeader.DataDirectory)[i],
+                fileInfo,
+                (PIMAGE_SECTION_HEADER) ((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS32)),
                 ntHeader->FileHeader.NumberOfSections,
-                ntHeader->OptionalHeader.SectionAlignment) != 0) {
+                ntHeader->OptionalHeader.SectionAlignment, PE_X86) != 0) {
 
-			printf("There was an error parsing the export directory.\n");
-		}
-
-		if (ntHeader->OptionalHeader.NumberOfRvaAndSizes >= 2 &&
-			parseImportDescriptor(
-                &(ntHeader->OptionalHeader.DataDirectory)[1], 
-                fileInfo, 
-                (PIMAGE_SECTION_HEADER) ((PBYTE) ntHeader + sizeof(IMAGE_NT_HEADERS32)),
-                ntHeader->FileHeader.NumberOfSections,
-                ntHeader->OptionalHeader.SectionAlignment,
-                0) != 0) {
-			printf("There was an error parsing the import descriptor.\n");
-		}
+                printf("There was an error parsing the %s directory.\n", directoryNames[i]);
+            }
+        }
 
 #ifdef DEBUGRVA
 		ntFileInfo->ntHeaders = ntHeader;
@@ -519,26 +612,17 @@ int _ParseExe64(PFILE_INFO fileInfo, PNT_FILE_INFO ntFileInfo,
 			printf("Parsing a DLL file...\n");
 		}
 
-        if (ntHeader->OptionalHeader.NumberOfRvaAndSizes && 
-            parseExportDirectory(
-                ntHeader->OptionalHeader.DataDirectory, 
-                fileInfo, 
-                (PIMAGE_SECTION_HEADER)((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS64)),
+        for (int i = 0; i < min(ntHeader->OptionalHeader.NumberOfRvaAndSizes, 4); ++i) {
+            if (directoryParserFunctions[i](
+                &(ntHeader->OptionalHeader.DataDirectory)[i],
+                fileInfo,
+                (PIMAGE_SECTION_HEADER) ((PBYTE)ntHeader + sizeof(IMAGE_NT_HEADERS64)),
                 ntHeader->FileHeader.NumberOfSections,
-                ntHeader->OptionalHeader.SectionAlignment) != 0) {
-            printf("There was an error parsing the export directory.\n");
-        }
+                ntHeader->OptionalHeader.SectionAlignment, PE_X64) != 0) {
 
-        if (ntHeader->OptionalHeader.NumberOfRvaAndSizes >= 2 &&
-			parseImportDescriptor(
-                &(ntHeader->OptionalHeader.DataDirectory)[1], 
-                fileInfo, 
-                (PIMAGE_SECTION_HEADER) ((PBYTE) ntHeader + sizeof(IMAGE_NT_HEADERS64)),
-                ntHeader->FileHeader.NumberOfSections,
-                ntHeader->OptionalHeader.SectionAlignment,
-                1) != 0) {
-			printf("There was an error parsing the import descriptor.\n");
-		}
+                printf("There was an error parsing the %s directory.\n", directoryNames[i]);
+            }
+        }
 
 #ifdef DEBUGRVA
 		ntFileInfo->ntHeaders = ntHeader;
