@@ -368,6 +368,16 @@ int parseResourceDirectory(
     return 0;
 }
 
+
+void displayUnwindInfo(PUNWIND_INFO unwindInfo) {
+    printf("Version: 0x%02X\n", unwindInfo->Version);
+    printf("Flags: 0x%02X\n", unwindInfo->Flags);
+    printf("Size of prolog: 0x%04X\n", unwindInfo->SizeOfProlog);
+    printf("Count of unwind codes: 0x%04X\n", unwindInfo->CountOfCodes);
+    printf("Frame register: 0x%02X\n", unwindInfo->FrameRegister);
+    printf("Frame offset: 0x%02X\n\n", unwindInfo->FrameOffset);
+}
+
 int parseExceptionDirectory(
     PIMAGE_DATA_DIRECTORY dExceptionInfo, 
     PFILE_INFO fileInfo, 
@@ -379,6 +389,8 @@ int parseExceptionDirectory(
     int retVal = 0;
     DWORD exceptionDirOffset = 0;
     PIMAGE_IA64_RUNTIME_FUNCTION_ENTRY runtimeFunction = NULL;
+    DWORD unwindInfoOffset = 0;
+    PUNWIND_INFO unwindInfo = NULL;
     
     
     if (dExceptionInfo == NULL) {
@@ -406,6 +418,12 @@ int parseExceptionDirectory(
         return -1;
     }
 
+    if (peArch != PE_X64) {
+        LOG_INVALID_PARAM("PE_ARCHITECTURE");
+        printf("Only x64 is supported for exception directory parsing.\n");
+        return -1;
+    }
+
 	do {
 		if (dExceptionInfo->Size == 0) {
 			printf("The file has no exception directory.\n");
@@ -427,6 +445,15 @@ int parseExceptionDirectory(
             printf("Identified exception-related function at 0x08%X-0x08%X.\n", 
                 runtimeFunction->BeginAddress, runtimeFunction->EndAddress);
             printf("Found unwind info at 0x%08X.\n", runtimeFunction->UnwindInfoAddress);
+
+            if (rvaToFileOffset(numberOfSections, sectionAlignment, sectionHeader, runtimeFunction->UnwindInfoAddress,
+                                &unwindInfoOffset) != 0) {
+                printf("Could not parse the current unwind data.\n");
+            }
+            else {
+                unwindInfo = (PUNWIND_INFO) (fileInfo->fileData + unwindInfoOffset);
+                displayUnwindInfo(unwindInfo);
+            }
 
             ++runtimeFunction;
         }

@@ -2,7 +2,7 @@
 *.pdb
 *.obj
 *.ilk
-*.exe
+executable-parser.exe
 *.id?
 *.i64
 *.nam
